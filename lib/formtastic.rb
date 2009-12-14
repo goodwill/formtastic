@@ -456,6 +456,7 @@ module Formtastic #:nodoc:
       #
       def inputs_for_nested_attributes(*args, &block) #:nodoc:
         options = args.extract_options!
+        
         args << options.merge!(:parent => { :builder => self, :for => options[:for] })
 
         fields_for_block = if block_given?
@@ -1192,11 +1193,29 @@ module Formtastic #:nodoc:
       def field_set_and_list_wrapping(*args, &block) #:nodoc:
         contents = args.last.is_a?(::Hash) ? '' : args.pop.flatten
         html_options = args.extract_options!
-
-        legend  = html_options.delete(:name).to_s
-        legend %= parent_child_index(html_options[:parent]) if html_options[:parent]
+        
+        child_index=0
+        child_object=nil
+        object=nil
+        if html_options[:parent]
+          child_index=parent_child_index(html_options[:parent]) 
+          object=html_options[:parent][:builder].instance_variable_get(:@object)
+          child_object_set=object.send(html_options[:parent][:for])
+          
+          if child_object_set.kind_of?(Array)
+            child_object=child_object_set[child_index]
+          else
+            object=child_object_set
+          end
+        end 
+                
+        name=html_options[:name]
+        name = name.call(child_object) if name.kind_of?(Proc)
+        
+        legend  = name.to_s
+        legend %= child_index if html_options[:parent]
         legend  = template.content_tag(:legend, template.content_tag(:span, legend)) unless legend.blank?
-
+                
         if block_given?
           contents = if template.respond_to?(:is_haml?) && template.is_haml?
             template.capture_haml(&block)
@@ -1209,7 +1228,7 @@ module Formtastic #:nodoc:
         contents = contents.join if contents.respond_to?(:join)
         fieldset = template.content_tag(:fieldset,
           legend << template.content_tag(:ol, contents),
-          html_options.except(:builder, :parent)
+          html_options.except(:builder, :parent,:name)
         )
 
         template.concat(fieldset) if block_given?
@@ -1222,11 +1241,14 @@ module Formtastic #:nodoc:
         title = options[:name]
 
         if title.blank?
-          valid_name_classes = [::String, ::Symbol]
+          valid_name_classes = [::String, ::Symbol, ::Proc]
           valid_name_classes.delete(::Symbol) if !block_given? && (args.first.is_a?(::Symbol) && self.content_columns.include?(args.first))
           title = args.shift if valid_name_classes.any? { |valid_name_class| args.first.is_a?(valid_name_class) }
         end
-        title = localized_string(title, title, :title) if title.is_a?(::Symbol)
+        
+        title = 
+            localized_string(title, title, :title) if title.is_a?(::Symbol)
+
         title
       end
 
@@ -1462,14 +1484,15 @@ module Formtastic #:nodoc:
       # association that the parent builds.
       #
       def parent_child_index(parent) #:nodoc:
+        
         duck = parent[:builder].instance_variable_get('@nested_child_index')
-
+        
         if duck.is_a?(Hash)
           child = parent[:for]
           child = child.first if child.respond_to?(:first)
-          duck[child].to_i + 1
+          duck["#{parent[:builder].object_name}[#{child}_attributes]"].to_i
         else
-          duck.to_i + 1
+          duck.to_i
         end
       end
 
